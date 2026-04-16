@@ -1,80 +1,169 @@
 package service;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.Reader;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.LinkedHashSet;
 import java.util.Properties;
-import java.util.*;
+import java.util.Set;
 
 public class ConfigManager {
     private static final String CONFIG_FILE = "config.properties";
+    private static final String CONFIG_TEMPLATE_RESOURCE = "config.example.properties";
     private static final String KEY_PINNED = "contacts.pinned";
     private static final String KEY_CONTACT_REMARK_PREFIX = "contact.remark.";
-    private static ConfigManager instance;
-    private Properties properties;
-    private File externalConfigFile;
+
+    private static volatile ConfigManager instance;
+
+    private final Properties properties = new Properties();
+    private final Path externalConfigPath;
 
     private ConfigManager() {
+        this.externalConfigPath = Path.of(System.getProperty("user.dir")).resolve(CONFIG_FILE);
         loadProperties();
     }
 
     public static ConfigManager getInstance() {
         if (instance == null) {
-            instance = new ConfigManager();
+            synchronized (ConfigManager.class) {
+                if (instance == null) {
+                    instance = new ConfigManager();
+                }
+            }
         }
         return instance;
     }
 
-    private void loadProperties() {
-        properties = new Properties();
-        // first try external config in working dir
-        externalConfigFile = new File(System.getProperty("user.dir"), CONFIG_FILE);
-        if (externalConfigFile.exists()) {
-            try (InputStream input = new FileInputStream(externalConfigFile)) {
-                if (input != null) {
-                    properties.load(input);
+    private synchronized void loadProperties() {
+        properties.clear();
+        ensureExternalConfigExists();
+
+        if (!Files.exists(externalConfigPath)) {
+            loadTemplateDefaults();
+            return;
+        }
+
+        try (Reader reader = Files.newBufferedReader(externalConfigPath, StandardCharsets.UTF_8)) {
+            properties.load(reader);
+        } catch (IOException e) {
+            System.err.println("Failed to load external config: " + e.getMessage());
+            loadTemplateDefaults();
+        }
+    }
+
+    private void ensureExternalConfigExists() {
+        if (Files.exists(externalConfigPath)) {
+            return;
+        }
+
+        try {
+            Path parent = externalConfigPath.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+
+            try (InputStream templateStream = getTemplateStream()) {
+                if (templateStream == null) {
+                    System.err.println("Missing bundled config template: " + CONFIG_TEMPLATE_RESOURCE);
+                    return;
                 }
+                Files.copy(templateStream, externalConfigPath, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException e) {
+            System.err.println("Failed to create external config template: " + e.getMessage());
+        }
+    }
+
+    private void loadTemplateDefaults() {
+        try (InputStream templateStream = getTemplateStream()) {
+            if (templateStream == null) {
+                System.err.println("Missing bundled config template: " + CONFIG_TEMPLATE_RESOURCE);
                 return;
-            } catch (IOException e) {
-                System.err.println("加载外部配置失败: " + e.getMessage());
             }
-        }
-
-        // fallback: load from classpath resource
-        try (InputStream input = getClass().getResourceAsStream("/" + CONFIG_FILE)) {
-            if (input != null) {
-                properties.load(input);
-            } else {
-                System.err.println("配置文件未找到: " + CONFIG_FILE + "，将使用默认配置");
-            }
+            properties.load(templateStream);
         } catch (IOException e) {
-            System.err.println("加载配置文件失败: " + e.getMessage());
+            System.err.println("Failed to load bundled config template: " + e.getMessage());
         }
     }
 
-    // persist properties to external config file (user.dir/config.properties)
+    private InputStream getTemplateStream() {
+        return ConfigManager.class.getClassLoader().getResourceAsStream(CONFIG_TEMPLATE_RESOURCE);
+    }
+
     public synchronized void save() {
-        if (externalConfigFile == null) externalConfigFile = new File(System.getProperty("user.dir"), CONFIG_FILE);
-        try (OutputStream out = new FileOutputStream(externalConfigFile)) {
-            properties.store(out, "AI Chat Configuration");
+        try {
+            Path parent = externalConfigPath.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+
+            try (Writer writer = Files.newBufferedWriter(externalConfigPath, StandardCharsets.UTF_8)) {
+                properties.store(writer, "EchoSoul external configuration");
+            }
         } catch (IOException e) {
-            System.err.println("保存配置失败: " + e.getMessage());
+            System.err.println("Failed to save external config: " + e.getMessage());
         }
     }
 
-    // DEEPSEEK API配置 (保留原方法)
+    public Path getExternalConfigPath() {
+        return externalConfigPath;
+    }
+
+    public synchronized String getProperty(String key, String defaultValue) {
+        return properties.getProperty(key, defaultValue);
+    }
+
+    public synchronized void setProperty(String key, String value) {
+        if (key == null || key.isBlank()) {
+            return;
+        }
+
+        if (value == null) {
+            properties.remove(key);
+        } else {
+            properties.setProperty(key, value);
+        }
+        save();
+    }
+
+    private synchronized void setPropertiesAndSave(String[][] entries) {
+        for (String[] entry : entries) {
+            if (entry == null || entry.length != 2) {
+                continue;
+            }
+
+            String key = entry[0];
+            String value = entry[1];
+            if (key == null || key.isBlank()) {
+                continue;
+            }
+
+            if (value == null) {
+                properties.remove(key);
+            } else {
+                properties.setProperty(key, value);
+            }
+        }
+        save();
+    }
+
     public String getApiKey() {
         return properties.getProperty("deepseek.api.key", "");
     }
 
     public void setDeepseekApiKey(String key) {
-        if (key != null) properties.setProperty("deepseek.api.key", key);
-        save();
+        setProperty("deepseek.api.key", key);
     }
 
     public String getApiUrl() {
         return properties.getProperty("deepseek.api.url", "https://api.deepseek.com/v1/chat/completions");
     }
 
-    // Baidu credentials (可读写)
     public String getBaiduAppId() {
         return properties.getProperty("baidu.app.id", "");
     }
@@ -88,13 +177,13 @@ public class ConfigManager {
     }
 
     public void setBaiduCredentials(String appId, String apiKey, String secretKey) {
-        if (appId != null) properties.setProperty("baidu.app.id", appId);
-        if (apiKey != null) properties.setProperty("baidu.api.key", apiKey);
-        if (secretKey != null) properties.setProperty("baidu.secret.key", secretKey);
-        save();
+        setPropertiesAndSave(new String[][]{
+                {"baidu.app.id", appId},
+                {"baidu.api.key", apiKey},
+                {"baidu.secret.key", secretKey}
+        });
     }
 
-    // 模型参数
     public double getTemperature() {
         return Double.parseDouble(properties.getProperty("temperature", "0.7"));
     }
@@ -103,16 +192,18 @@ public class ConfigManager {
         return Integer.parseInt(properties.getProperty("max_tokens", "150"));
     }
 
-    // 超时设置
     public int getConnectTimeout() {
-        return Integer.parseInt(properties.getProperty("connect.timeout", "10"));
+        return Integer.parseInt(properties.getProperty("connect.timeout", "15"));
     }
 
     public int getReadTimeout() {
-        return Integer.parseInt(properties.getProperty("read.timeout", "30"));
+        return Integer.parseInt(properties.getProperty("read.timeout", "60"));
     }
 
-    // 应用设置
+    public int getWriteTimeout() {
+        return Integer.parseInt(properties.getProperty("write.timeout", "60"));
+    }
+
     public int getHistoryLimit() {
         return Integer.parseInt(properties.getProperty("history.limit", "20"));
     }
@@ -125,68 +216,78 @@ public class ConfigManager {
         return properties.getProperty("app.version", "1.0");
     }
 
-    // TTS 自动播放配置（默认开启）
     public boolean isAutoPlayEnabled() {
         return Boolean.parseBoolean(properties.getProperty("tts.autoplay", "true"));
     }
 
     public void setAutoPlayEnabled(boolean enabled) {
-        properties.setProperty("tts.autoplay", Boolean.toString(enabled));
-        save();
+        setProperty("tts.autoplay", Boolean.toString(enabled));
     }
 
-    // 侧边栏折叠状态（默认折叠：true）
     public boolean isSidebarCollapsed() {
         return Boolean.parseBoolean(properties.getProperty("sidebar.collapsed", "true"));
     }
 
     public void setSidebarCollapsed(boolean collapsed) {
-        properties.setProperty("sidebar.collapsed", Boolean.toString(collapsed));
-        save();
+        setProperty("sidebar.collapsed", Boolean.toString(collapsed));
     }
 
-    // 置顶联系人存储：使用逗号分隔的 id 列表
     public synchronized Set<String> getPinnedContacts() {
-        String v = properties.getProperty(KEY_PINNED, "");
-        Set<String> set = new LinkedHashSet<>();
-        if (v != null && !v.isBlank()) {
-            for (String s : v.split(",")) {
-                String id = s.trim();
-                if (!id.isEmpty()) set.add(id);
+        String value = properties.getProperty(KEY_PINNED, "");
+        Set<String> result = new LinkedHashSet<>();
+        if (value != null && !value.isBlank()) {
+            for (String rawId : value.split(",")) {
+                String contactId = rawId.trim();
+                if (!contactId.isEmpty()) {
+                    result.add(contactId);
+                }
             }
         }
-        return set;
+        return result;
     }
 
     public synchronized void setPinnedContacts(Set<String> pinned) {
         if (pinned == null || pinned.isEmpty()) {
             properties.remove(KEY_PINNED);
         } else {
-            String joined = String.join(",", pinned);
-            properties.setProperty(KEY_PINNED, joined);
+            properties.setProperty(KEY_PINNED, String.join(",", pinned));
         }
         save();
     }
 
     public boolean isPinned(String contactId) {
-        if (contactId == null || contactId.isBlank()) return false;
+        if (contactId == null || contactId.isBlank()) {
+            return false;
+        }
         return getPinnedContacts().contains(contactId);
     }
 
     public synchronized void setPinned(String contactId, boolean pinned) {
-        if (contactId == null || contactId.isBlank()) return;
-        Set<String> set = getPinnedContacts();
-        if (pinned) set.add(contactId); else set.remove(contactId);
-        setPinnedContacts(set);
+        if (contactId == null || contactId.isBlank()) {
+            return;
+        }
+
+        Set<String> current = getPinnedContacts();
+        if (pinned) {
+            current.add(contactId);
+        } else {
+            current.remove(contactId);
+        }
+        setPinnedContacts(current);
     }
 
     public String getContactRemark(String contactId) {
-        if (contactId == null || contactId.isBlank()) return "";
+        if (contactId == null || contactId.isBlank()) {
+            return "";
+        }
         return properties.getProperty(KEY_CONTACT_REMARK_PREFIX + contactId, "");
     }
 
     public synchronized void setContactRemark(String contactId, String remark) {
-        if (contactId == null || contactId.isBlank()) return;
+        if (contactId == null || contactId.isBlank()) {
+            return;
+        }
+
         String key = KEY_CONTACT_REMARK_PREFIX + contactId;
         if (remark == null || remark.isBlank()) {
             properties.remove(key);
@@ -201,8 +302,9 @@ public class ConfigManager {
     }
 
     public void setUserAvatarPath(String path) {
-        if (path == null || path.isBlank()) return;
-        properties.setProperty("user.avatar.path", path);
-        save();
+        if (path == null || path.isBlank()) {
+            return;
+        }
+        setProperty("user.avatar.path", path);
     }
 }

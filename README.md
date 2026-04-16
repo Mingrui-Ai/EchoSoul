@@ -18,6 +18,60 @@ This repository has been prepared for a minimal open-source source release:
 - Gson
 - Baidu Speech SDK
 
+## Architecture
+
+```mermaid
+graph TD
+    %% 定义样式
+    classDef ui fill:#e1f5fe,stroke:#03a9f4,stroke-width:2px;
+    classDef service fill:#fff3e0,stroke:#ff9800,stroke-width:2px;
+    classDef storage fill:#e8f5e9,stroke:#4caf50,stroke-width:2px;
+    classDef external fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px;
+
+    %% 节点定义
+    User((用户))
+    UI[JavaFX 界面层<br/>主界面/角色列表]:::ui
+    
+    subgraph 核心服务层
+        ChatService{ChatService<br/>核心调度器}:::service
+        Speech[语音服务层<br/>Baidu / Vosk]:::service
+    end
+
+    subgraph 外部调用与本地引擎
+        DeepSeek[DeepSeek API<br/>在线大模型]:::external
+        LocalBot[本地 ChatBot<br/>离线降级方案]:::service
+    end
+
+    subgraph 本地存储模块
+        HistoryManager[HistoryManager<br/>会话管理]:::storage
+        ConfigManager[ConfigManager<br/>配置管理]:::storage
+        ContactsService[ContactsService<br/>角色管理]:::storage
+        JSON[(JSON/TXT 文件<br/>历史会话/词库)]:::storage
+        Props[(config.properties<br/>API 密钥)]:::storage
+    end
+
+    %% 数据流向
+    User -->|文本/语音输入| UI
+    UI -->|发送消息| ChatService
+    
+    ChatService -->|1. 在线请求 (OkHttp)| DeepSeek
+    DeepSeek -->|返回 JSON 解析| UI
+    
+    ChatService -->|2. 网络异常/断网| LocalBot
+    LocalBot -->|读取| JSON
+    
+    UI -->|录音调用| Speech
+    Speech <-->|STT/TTS| User
+    
+    ChatService -->|持久化数据| HistoryManager
+    HistoryManager -->|读写| JSON
+    ContactsService -->|读写| JSON
+    
+    ChatService -->|读取运行时配置| ConfigManager
+    ConfigManager -->|读取| Props
+
+
+
 ## Requirements
 
 - JDK 21 or newer

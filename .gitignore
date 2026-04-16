@@ -41,7 +41,7 @@ response_audio.mp3
 config.properties
 !.gitignore
 !config.example.properties
-!resources/config.properties
+!resources/config.example.properties
 
 ### OS ###
 Thumbs.db
