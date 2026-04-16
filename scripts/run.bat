@@ -1,0 +1,18 @@
+@echo off
+setlocal
+
+where mvn >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] Maven was not found on PATH.
+  echo [ERROR] Install Maven 3.9+ and run this script again.
+  exit /b 1
+)
+
+echo [INFO] Starting EchoSoul with Maven...
+mvn javafx:run
+if errorlevel 1 (
+  echo [ERROR] Application startup failed.
+  exit /b 1
+)
+
+endlocal
