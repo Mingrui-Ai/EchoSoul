@@ -13,9 +13,9 @@ public class ChatBot {
     private Map<String, CategoryKnowledge> categories = new HashMap<>();
     private Map<String, List<String>> synonyms = new HashMap<>();
     private Map<String, List<String>> variedResponses;
-    private static final String DEFAULT_KNOWLEDGE_FILE = "src/LocalChatting/knowledge_base.txt";
-    private static final String SYNONYMS_FILE = "src/LocalChatting/synonyms.txt";
-    private static final String VARIED_RESPONSES_FILE = "src/LocalChatting/varied_responses.txt";
+    private static final String DEFAULT_KNOWLEDGE_FILE = "/database/knowledge_base.txt";
+    private static final String SYNONYMS_FILE = "/database/synonyms.txt";
+    private static final String VARIED_RESPONSES_FILE = "/database/varied_responses.txt";
 
 
     public ChatBot() {
@@ -1631,9 +1631,7 @@ public class ChatBot {
     public void addSynonym(String main,String syn){ synonyms.computeIfAbsent(main,k->new ArrayList<>()).add(syn); }
 
     public void loadFromFiles() {
-        loadKnowledgeFromFile(DEFAULT_KNOWLEDGE_FILE);
-        loadSynonymsFromFile(SYNONYMS_FILE);
-        loadVariedResponsesFromFile(VARIED_RESPONSES_FILE);
+        loadAllResources();
     }
 
     public void loadKnowledgeFromFile(String filename) {
@@ -1674,11 +1672,44 @@ public class ChatBot {
     }
 
     public void loadAllResources(){
-        loadKnowledgeFromFolder("/resourcse/database/knowledge_base.txt");
-        loadSynonymsFromFile("/resourcse/database/synonyms.txt");
+        loadKnowledgeFromFolder(DEFAULT_KNOWLEDGE_FILE);
+        loadSynonymsFromResource(SYNONYMS_FILE);
+        loadVariedResponsesFromResource(VARIED_RESPONSES_FILE);
     }
 
     private void loadKnowledgeFromFolder(String path){ List<String> lines = readLines(path); String current="general"; for(String line: lines){ line=line.trim(); if(line.isEmpty()) continue; if(line.startsWith("[")&&line.endsWith("]")){ current=line.substring(1,line.length()-1).trim(); categories.computeIfAbsent(current, CategoryKnowledge::new); continue;} if(line.startsWith("#")) continue; String[] parts=line.split("=",2); if(parts.length==2){ categories.computeIfAbsent(current, CategoryKnowledge::new).addResponse(parts[0].trim(), processDynamicContent(parts[1].trim())); } } }
+
+    private void loadVariedResponsesFromResource(String path) {
+        for (String line : readLines(path)) {
+            line = line.trim();
+            if (line.isEmpty() || line.startsWith("#")) continue;
+
+            String[] parts = line.split("=", 2);
+            if (parts.length == 2) {
+                String keyword = parts[0].trim();
+                String[] responseList = parts[1].split("\\|");
+                for (String response : responseList) {
+                    addVariedResponse(keyword, response.trim());
+                }
+            }
+        }
+    }
+
+    private void loadSynonymsFromResource(String path) {
+        for (String line : readLines(path)) {
+            line = line.trim();
+            if (line.isEmpty() || line.startsWith("#")) continue;
+
+            String[] parts = line.split("=", 2);
+            if (parts.length == 2) {
+                String mainWord = parts[0].trim();
+                String[] synonymList = parts[1].split(",");
+                for (String synonym : synonymList) {
+                    addSynonym(mainWord, synonym.trim());
+                }
+            }
+        }
+    }
 
     public void addVariedResponse(String keyword, String response) {
         variedResponses.computeIfAbsent(keyword, k -> new ArrayList<>()).add(response);

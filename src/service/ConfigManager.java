@@ -1,5 +1,9 @@
 package service;
 
+import service.ai.AiChatConfig;
+import service.ai.AiProtocol;
+import service.ai.AiProviderPreset;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Reader;
@@ -9,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Properties;
 import java.util.Set;
 
@@ -152,16 +157,138 @@ public class ConfigManager {
         save();
     }
 
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private synchronized String getFirstConfiguredValue(String... keys) {
+        for (String key : keys) {
+            String value = trimToNull(properties.getProperty(key));
+            if (value != null) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private int getIntProperty(String key, int defaultValue) {
+        try {
+            return Integer.parseInt(properties.getProperty(key, Integer.toString(defaultValue)).trim());
+        } catch (Exception ignored) {
+            return defaultValue;
+        }
+    }
+
+    private double getDoubleProperty(String key, double defaultValue) {
+        try {
+            return Double.parseDouble(properties.getProperty(key, Double.toString(defaultValue)).trim());
+        } catch (Exception ignored) {
+            return defaultValue;
+        }
+    }
+
+    private String formatDouble(double value) {
+        return String.format(Locale.US, "%s", value);
+    }
+
+    public AiProviderPreset getAiProviderPreset() {
+        return AiProviderPreset.fromConfigValue(
+                getFirstConfiguredValue("ai.provider.preset", "ai.provider")
+        );
+    }
+
+    public AiProtocol getAiProtocol() {
+        String configured = getFirstConfiguredValue("ai.protocol");
+        if (!configured.isBlank()) {
+            return AiProtocol.fromConfigValue(configured);
+        }
+        return getAiProviderPreset().getProtocol();
+    }
+
+    public String getAiApiKey() {
+        return getFirstConfiguredValue("ai.api.key", "deepseek.api.key");
+    }
+
+    public void setAiApiKey(String apiKey) {
+        setProperty("ai.api.key", trimToNull(apiKey));
+    }
+
+    public String getAiBaseUrl() {
+        String configured = getFirstConfiguredValue("ai.base.url", "ai.api.url", "deepseek.api.url");
+        if (!configured.isBlank()) {
+            return configured;
+        }
+        return getAiProviderPreset().getDefaultBaseUrl();
+    }
+
+    public String getAiModel() {
+        String configured = getFirstConfiguredValue("ai.model");
+        if (!configured.isBlank()) {
+            return configured;
+        }
+        return getAiProviderPreset().getDefaultModel();
+    }
+
+    public AiChatConfig getAiChatConfig() {
+        AiProviderPreset preset = getAiProviderPreset();
+        AiProtocol protocol = getAiProtocol();
+        return new AiChatConfig(
+                preset,
+                protocol,
+                getAiApiKey(),
+                getAiBaseUrl(),
+                getAiModel(),
+                getTemperature(),
+                getMaxTokens(),
+                getConnectTimeout(),
+                getReadTimeout(),
+                getWriteTimeout()
+        );
+    }
+
+    public void setAiSettings(
+            AiProviderPreset preset,
+            AiProtocol protocol,
+            String apiKey,
+            String baseUrl,
+            String model,
+            double temperature,
+            int maxTokens,
+            int connectTimeout,
+            int readTimeout,
+            int writeTimeout
+    ) {
+        AiProviderPreset effectivePreset = preset == null ? AiProviderPreset.DEEPSEEK : preset;
+        AiProtocol effectiveProtocol = protocol == null ? effectivePreset.getProtocol() : protocol;
+
+        setPropertiesAndSave(new String[][]{
+                {"ai.provider.preset", effectivePreset.name()},
+                {"ai.protocol", effectiveProtocol.name()},
+                {"ai.api.key", trimToNull(apiKey)},
+                {"ai.base.url", trimToNull(baseUrl)},
+                {"ai.model", trimToNull(model)},
+                {"temperature", formatDouble(temperature)},
+                {"max_tokens", Integer.toString(maxTokens)},
+                {"connect.timeout", Integer.toString(connectTimeout)},
+                {"read.timeout", Integer.toString(readTimeout)},
+                {"write.timeout", Integer.toString(writeTimeout)}
+        });
+    }
+
     public String getApiKey() {
-        return properties.getProperty("deepseek.api.key", "");
+        return getAiApiKey();
     }
 
     public void setDeepseekApiKey(String key) {
-        setProperty("deepseek.api.key", key);
+        setAiApiKey(key);
     }
 
     public String getApiUrl() {
-        return properties.getProperty("deepseek.api.url", "https://api.deepseek.com/v1/chat/completions");
+        return getAiBaseUrl();
     }
 
     public String getBaiduAppId() {
@@ -178,34 +305,34 @@ public class ConfigManager {
 
     public void setBaiduCredentials(String appId, String apiKey, String secretKey) {
         setPropertiesAndSave(new String[][]{
-                {"baidu.app.id", appId},
-                {"baidu.api.key", apiKey},
-                {"baidu.secret.key", secretKey}
+                {"baidu.app.id", trimToNull(appId)},
+                {"baidu.api.key", trimToNull(apiKey)},
+                {"baidu.secret.key", trimToNull(secretKey)}
         });
     }
 
     public double getTemperature() {
-        return Double.parseDouble(properties.getProperty("temperature", "0.7"));
+        return getDoubleProperty("temperature", 0.7);
     }
 
     public int getMaxTokens() {
-        return Integer.parseInt(properties.getProperty("max_tokens", "150"));
+        return getIntProperty("max_tokens", 150);
     }
 
     public int getConnectTimeout() {
-        return Integer.parseInt(properties.getProperty("connect.timeout", "15"));
+        return getIntProperty("connect.timeout", 15);
     }
 
     public int getReadTimeout() {
-        return Integer.parseInt(properties.getProperty("read.timeout", "60"));
+        return getIntProperty("read.timeout", 60);
     }
 
     public int getWriteTimeout() {
-        return Integer.parseInt(properties.getProperty("write.timeout", "60"));
+        return getIntProperty("write.timeout", 60);
     }
 
     public int getHistoryLimit() {
-        return Integer.parseInt(properties.getProperty("history.limit", "20"));
+        return getIntProperty("history.limit", 20);
     }
 
     public String getAppName() {

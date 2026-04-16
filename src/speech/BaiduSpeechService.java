@@ -38,8 +38,8 @@ public class BaiduSpeechService {
         this.secretKey = ConfigManager.getInstance().getBaiduSecretKey();
 
         AipSpeech tmp = null;
-        if (apiKey == null || apiKey.isEmpty() || secretKey == null || secretKey.isEmpty()) {
-            LOGGER.warning("Baidu credentials not configured; Baidu speech disabled. Set baidu.app.id, baidu.api.key and baidu.secret.key in config.properties or via Settings.");
+        if (!hasCredentials()) {
+            LOGGER.fine("Baidu credentials are not configured. Speech features stay disabled until credentials are provided.");
         } else {
             try {
                 tmp = new AipSpeech(appId, apiKey, secretKey);
@@ -61,6 +61,12 @@ public class BaiduSpeechService {
         return client != null;
     }
 
+    private boolean hasCredentials() {
+        return appId != null && !appId.isBlank()
+                && apiKey != null && !apiKey.isBlank()
+                && secretKey != null && !secretKey.isBlank();
+    }
+
     public boolean isRecording() {
         return recorder.isRecording();
     }
@@ -74,7 +80,7 @@ public class BaiduSpeechService {
         new Thread(() -> {
             try {
                 if (client == null) {
-                    LOGGER.warning("Baidu client not initialized; cannot perform ASR");
+                    LOGGER.fine("Baidu client is unavailable; skipping ASR request.");
                     if (callback != null) Platform.runLater(() -> callback.accept(null));
                     return;
                 }
@@ -123,12 +129,15 @@ public class BaiduSpeechService {
                 return baos.toByteArray();
             }
         } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "读取音频文件失败: " + e.getMessage(), e);
+            LOGGER.log(Level.WARNING, "Failed to read audio file: " + e.getMessage(), e);
             return null;
         }
     }
 
     public boolean textToSpeech(String text, String outputPath) {
+        if (client == null || text == null || text.isBlank() || outputPath == null || outputPath.isBlank()) {
+            return false;
+        }
         try {
             HashMap<String, Object> options = new HashMap<>();
             options.put("spd", 6);
@@ -156,6 +165,9 @@ public class BaiduSpeechService {
     }
 
     public void speakAndPlay(String text) {
+        if (text == null || text.isBlank() || client == null) {
+            return;
+        }
         new Thread(() -> {
             boolean ok = textToSpeech(text, RESPONSE_AUDIO_PATH);
             if (ok) {
@@ -165,7 +177,7 @@ public class BaiduSpeechService {
                         MediaPlayer player = new MediaPlayer(media);
                         player.play();
                     } catch (Exception e) {
-                        LOGGER.log(Level.WARNING, "播放合成音频失败: " + e.getMessage(), e);
+                        LOGGER.log(Level.WARNING, "Failed to play synthesized audio: " + e.getMessage(), e);
                     }
                 });
             }
@@ -186,7 +198,7 @@ public class BaiduSpeechService {
         void startRecording() {
             DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
             if (!AudioSystem.isLineSupported(info)) {
-                LOGGER.warning("音频格式不被支持");
+                LOGGER.warning("Audio format is not supported.");
                 return;
             }
 
@@ -200,12 +212,12 @@ public class BaiduSpeechService {
                     try (AudioInputStream ais = new AudioInputStream(line)) {
                         AudioSystem.write(ais, AudioFileFormat.Type.WAVE, new File(AUDIO_FILE_PATH));
                     } catch (IOException e) {
-                        LOGGER.log(Level.WARNING, "录音写入失败: " + e.getMessage(), e);
+                        LOGGER.log(Level.WARNING, "Failed to write recorded audio: " + e.getMessage(), e);
                     }
                 }, "audio-record-thread");
                 recordingThread.start();
             } catch (LineUnavailableException e) {
-                LOGGER.log(Level.WARNING, "音频行不可用: " + e.getMessage(), e);
+                LOGGER.log(Level.WARNING, "Audio input line is unavailable: " + e.getMessage(), e);
             }
         }
 
@@ -217,7 +229,8 @@ public class BaiduSpeechService {
                 try {
                     if (recordingThread != null) recordingThread.join();
                 } catch (InterruptedException e) {
-                    LOGGER.log(Level.WARNING, "录音线程中断: " + e.getMessage(), e);
+                    Thread.currentThread().interrupt();
+                    LOGGER.log(Level.WARNING, "Audio recording thread was interrupted: " + e.getMessage(), e);
                 }
             }
         }
