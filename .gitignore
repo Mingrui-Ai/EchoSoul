@@ -30,12 +30,14 @@ bin/
 
 ### Maven ###
 target/
+META-INF/
 
 ### Local runtime state ###
 history/
 temp/
 temp_audio.wav
 response_audio.mp3
+.codex_tmp_*.java
 
 ### Local configuration ###
 config.properties

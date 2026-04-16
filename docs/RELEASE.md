@@ -28,22 +28,33 @@ Commands:
 mvn -B -DskipTests clean package
 ```
 
+This generates the jpackage input layout:
+
+- `target/jpackage-input/echosoul-0.1.1.jar`
+- `target/jpackage-input/libs/`
+
 Run locally:
 
 ```powershell
 mvn javafx:run
 ```
 
+Optional local packaging check:
+
+```powershell
+jpackage --type app-image --dest target/installer --input target/jpackage-input --name EchoSoul --main-class app.Main --main-jar echosoul-0.1.1.jar
+```
+
 ## Suggested Git release flow
 
 1. Update `CHANGELOG.md`.
 2. Commit the release preparation changes.
-3. Create a tag such as `v0.1.0`.
+3. Create a tag such as `vX.Y.Z`.
 4. Push the branch and tag.
 5. Create a GitHub release from that tag.
 6. If you want a binary attachment later, build on the target operating system and upload the generated archive or installer.
 
 ## Notes
 
-- This repository currently targets a source release first. Installer packaging is intentionally left as a later step.
-- Optional speech features require user-supplied DeepSeek, Baidu, or Vosk setup.
+- This repository currently targets a source release first, with optional local installer packaging.
+- Optional speech features require user-supplied AI provider, Baidu, or Vosk setup.

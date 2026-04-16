@@ -1,24 +1,25 @@
 # EchoSoul
 
-EchoSoul is a JavaFX desktop chat application with persona-based conversations, local history management, optional online model access, and optional speech features.
+![Java](https://img.shields.io/badge/Java-21+-blue.svg)
+![JavaFX](https://img.shields.io/badge/JavaFX-Desktop-orange.svg)
+![License](https://img.shields.io/badge/License-MIT-green.svg)
 
-This repository has been prepared for a minimal open-source release:
+![EchoSoul Demo](resources/images/app_icon.png)
 
-- standard Maven build entry
-- sanitized public configuration
-- root-level project documentation
-- CI build workflow
-- ignore rules for local runtime data and generated files
+EchoSoul is a JavaFX desktop chat application featuring persona-based conversations, local history management, pluggable AI provider access, and optional speech capabilities.
 
-## Tech Stack
+Built with modern Java engineering practices, it ensures data privacy through local storage and offers a seamless fallback mechanism when offline.
 
-- Java 21+
-- JavaFX
-- Maven
-- Gson
-- Baidu Speech SDK
+## ✨ Features
 
-## Architecture
+- **🎭 Persona-Based Chat**: Create and switch between different AI characters with custom system prompts and avatars.
+- **🔌 Pluggable AI Providers**: Built-in protocol adapters for OpenAI-compatible, Anthropic, and Gemini APIs. Easily switch models via configuration.
+- **🛡️ Local Fallback Engine**: Includes a built-in offline chatbot and knowledge base. Never lose the ability to chat, even without an internet connection.
+- **🎙️ Voice Interaction**: Optional STT (Speech-to-Text) via Baidu/Vosk and TTS (Text-to-Speech) integrations for hands-free conversations.
+- **💾 Local First & Private**: All chat histories, credentials, and settings are stored strictly on your local machine.
+- **🚀 Native Ready**: Configured for `jpackage` to effortlessly build standalone Windows `.exe` installers.
+
+## 🏗️ Architecture
 
 ```mermaid
 graph TD
@@ -29,129 +30,119 @@ graph TD
     classDef external fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px;
 
     %% 节点定义
-    User((用户))
-    UI[JavaFX 界面层<br/>主界面/角色列表]:::ui
+    User((User))
+    UI[JavaFX UI<br/>src/app]:::ui
     
-    subgraph 核心服务层
-        ChatService{ChatService<br/>核心调度器}:::service
-        Speech[语音服务层<br/>Baidu / Vosk]:::service
+    subgraph Core Services
+        ChatService{Chat Orchestration<br/>src/service}:::service
+        Adapter[AI Protocol Adapters<br/>src/service/ai]:::service
+        Speech[Speech Service<br/>Baidu / Vosk]:::service
     end
 
-    subgraph 外部调用与本地引擎
-        DeepSeek[DeepSeek API<br/>在线大模型]:::external
-        LocalBot[本地 ChatBot<br/>离线降级方案]:::service
+    subgraph Providers and Engines
+        LLM[Cloud AI Providers<br/>OpenAI / Claude / Gemini]:::external
+        LocalBot[Local Fallback Bot<br/>src/local]:::service
     end
 
-    subgraph 本地存储模块
-        HistoryManager[HistoryManager<br/>会话管理]:::storage
-        ConfigManager[ConfigManager<br/>配置管理]:::storage
-        ContactsService[ContactsService<br/>角色管理]:::storage
-        JSON[(JSON/TXT 文件<br/>历史会话/词库)]:::storage
-        Props[(config.properties<br/>API 密钥)]:::storage
+    subgraph Local Storage
+        HistoryManager[History & Contacts]:::storage
+        ConfigManager[Configuration]:::storage
+        JSON[(JSON/TXT<br/>History/Knowledge)]:::storage
+        Props[(config.properties<br/>Credentials)]:::storage
     end
 
     %% 数据流向
-    User -->|文本/语音输入| UI
-    UI -->|发送消息| ChatService
+    User -->|Text / Voice| UI
+    UI -->|Dispatch| ChatService
     
-    ChatService -->|1. 在线请求 OkHttp| DeepSeek
-    DeepSeek -->|返回 JSON 解析| UI
+    ChatService -->|Online Request| Adapter
+    Adapter -->|Format Protocol| LLM
+    LLM -->|Response| Adapter
     
-    ChatService -->|2. 网络异常/断网| LocalBot
-    LocalBot -->|读取| JSON
+    ChatService -->|Offline Fallback| LocalBot
+    LocalBot -->|Match| JSON
     
-    UI -->|录音调用| Speech
+    UI -->|Trigger Audio| Speech
     Speech <-->|STT/TTS| User
     
-    ChatService -->|持久化数据| HistoryManager
-    HistoryManager -->|读写| JSON
-    ContactsService -->|读写| JSON
+    ChatService -->|Persist| HistoryManager
+    HistoryManager -->|I/O| JSON
     
-    ChatService -->|读取运行时配置| ConfigManager
-    ConfigManager -->|读取| Props
+    ChatService -->|Load Settings| ConfigManager
+    ConfigManager -->|Read/Write| Props
 ```
 
-## Requirements
+- `src/app`: JavaFX UI and application bootstrap.
+- `src/service`: Chat orchestration, configuration, contacts, history, and UI resource services.
+- `src/service/ai`: Provider presets and protocol adapters (OpenAI, Anthropic, Gemini).
+- `src/local`: Local fallback chatbot and built-in knowledge resources.
+- `src/speech`: Optional Baidu and Vosk speech integrations.
 
+## 🛠️ Tech Stack
+
+- Java 21+ / JavaFX
+- Maven
+- Gson / OkHttp
+- Baidu Speech SDK / Vosk
+
+## 🚀 Quick Start
+
+### Requirements
 - JDK 21 or newer
 - Maven 3.9 or newer
 
-## Quick Start
-
-1. Install JDK 21+ and Maven 3.9+.
-2. Create a local `config.properties` in the repository root based on `config.example.properties`.
-3. Fill in any external service credentials you want to use.
-4. Run:
+### Setup
+1. Clone the repository.
+2. Start the app once, or manually copy `config.example.properties` to a root-level `config.properties`.
+3. Fill in the AI provider settings and any optional speech credentials you want to use.
+4. Run the application:
 
 ```powershell
 mvn javafx:run
 ```
 
-Or use the helper script:
+*(Alternatively, use the helper script: `./scripts/run.bat`)*
 
-```powershell
-.\scripts\run.bat
-```
+## ⚙️ Configuration
 
-## Build
+Public templates live in:
+- `resources/config.example.properties`
+- `config.example.properties`
 
-Package the project:
+Writable runtime settings live in `config.properties` in the repository root or beside the packaged app.
+
+**Optional Integrations:**
+- **AI Provider**: set `ai.provider.preset`, `ai.protocol`, `ai.api.key`, `ai.base.url`, and `ai.model`.
+- **Baidu Speech**: set `baidu.app.id`, `baidu.api.key`, and `baidu.secret.key`.
+- **Vosk Offline Speech**: place a compatible speech model in a top-level `model/` directory.
+
+> **Note:** If no online AI provider is configured, the app will automatically fall back to its local reply logic.
+
+## 📦 Build & Native Packaging
+
+Package the project into a Fat JAR with dependencies:
 
 ```powershell
 mvn -B -DskipTests clean package
 ```
 
-Or use:
+This produces `target/jpackage-input/echosoul-0.1.1.jar` and `target/jpackage-input/libs/`.
+
+**Native Windows App Image:**
+After packaging, you can build a standalone Windows app image or installer using `jpackage`:
 
 ```powershell
-.\scripts\compile.bat
+jpackage --type app-image --dest target/installer --input target/jpackage-input --name EchoSoul --main-class app.Main --main-jar echosoul-0.1.1.jar
 ```
 
-## Configuration
+## 📝 Open-Source Notes
 
-Public defaults live in:
+- Private credentials are **never** committed.
+- Runtime data (chat history, generated audio, logs) are ignored via `.gitignore`.
+- Before wider public redistribution, please review bundled images and any third-party assets for license compliance.
 
-- `resources/config.properties`
-- `config.example.properties`
+## 🤝 Contributing
+See `CONTRIBUTING.md` for details on how to help out.
 
-Local overrides should live in:
-
-- `config.properties` in the repository root
-
-Optional integrations:
-
-- DeepSeek: set `deepseek.api.key`
-- Baidu speech: set `baidu.app.id`, `baidu.api.key`, and `baidu.secret.key`
-- Vosk offline speech: place a compatible speech model in a top-level `model/` directory if you want offline recognition
-
-If no DeepSeek key is provided, the app can still fall back to its local reply logic.
-
-## Repository Layout
-
-```text
-.
-|-- .github/workflows/      CI build workflow
-|-- docs/                   release notes and maintenance docs
-|-- resources/              bundled config and static assets
-|-- scripts/                helper scripts for build and run
-|-- src/                    Java source code
-|-- CHANGELOG.md
-|-- config.example.properties
-|-- LICENSE
-|-- pom.xml
-`-- README.md
-```
-
-## Open-Source Notes
-
-- Private credentials are not committed.
-- Runtime data such as chat history and generated audio files are ignored.
-- Before wider public redistribution, review bundled images and any third-party assets for license compliance.
-
-## Contributing
-
-See `CONTRIBUTING.md`.
-
-## License
-
+## 📄 License
 This project is released under the MIT License. See `LICENSE`.
