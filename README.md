@@ -2,7 +2,7 @@
 
 EchoSoul is a JavaFX desktop chat application with persona-based conversations, local history management, optional online model access, and optional speech features.
 
-This repository has been prepared for a minimal open-source source release:
+This repository has been prepared for a minimal open-source release:
 
 - standard Maven build entry
 - sanitized public configuration
@@ -54,7 +54,7 @@ graph TD
     User -->|文本/语音输入| UI
     UI -->|发送消息| ChatService
     
-    ChatService -->|1. 在线请求 (OkHttp)| DeepSeek
+    ChatService -->|1. 在线请求 OkHttp| DeepSeek
     DeepSeek -->|返回 JSON 解析| UI
     
     ChatService -->|2. 网络异常/断网| LocalBot
@@ -69,8 +69,7 @@ graph TD
     
     ChatService -->|读取运行时配置| ConfigManager
     ConfigManager -->|读取| Props
-
-
+```
 
 ## Requirements
 
