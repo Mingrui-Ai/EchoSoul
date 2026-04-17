@@ -4,7 +4,7 @@
 ![JavaFX](https://img.shields.io/badge/JavaFX-Desktop-orange.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
-![EchoSoul Demo](resources/images/app_icon.png)
+<img src="resources/images/app_icon.png" width="150" align="left">
 
 EchoSoul is a JavaFX desktop chat application featuring persona-based conversations, local history management, pluggable AI provider access, and optional speech capabilities.
 
