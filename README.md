@@ -10,6 +10,8 @@ EchoSoul is a JavaFX desktop chat application featuring persona-based conversati
 
 Built with modern Java engineering practices, it ensures data privacy through local storage and offers a seamless fallback mechanism when offline.
 
+<br>
+
 ## ✨ Features
 
 - **🎭 Persona-Based Chat**: Create and switch between different AI characters with custom system prompts and avatars.
