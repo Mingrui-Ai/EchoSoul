@@ -32,6 +32,7 @@ This generates the jpackage input layout:
 
 - `target/jpackage-input/echosoul-0.1.1.jar`
 - `target/jpackage-input/libs/`
+- `target/runtime/echosoul-jre/`
 
 Run locally:
 
@@ -42,8 +43,10 @@ mvn javafx:run
 Optional local packaging check:
 
 ```powershell
-jpackage --type app-image --dest target/installer --input target/jpackage-input --name EchoSoul --main-class app.Main --main-jar echosoul-0.1.1.jar
+./scripts/package.ps1 -Type app-image
 ```
+
+The packaging script uses `resources/images/EchoSoul.ico` if available and passes `--runtime-image target/runtime/echosoul-jre` to `jpackage`.
 
 ## Suggested Git release flow
 

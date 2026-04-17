@@ -2,6 +2,8 @@ package app;
 
 import javafx.application.Application;
 import javafx.application.Platform;
+import javafx.concurrent.Task;
+import javafx.embed.swing.SwingFXUtils;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
@@ -24,19 +26,28 @@ import service.ContactInfo;
 import service.UIResourceService;
 import service.GalleryService;
 import service.MessageRenderService;
+import service.ai.AiProviderPreset;
 import speech.BaiduSpeechService;
 import speech.TextToSpeech;
 import speech.VoskSpeechService;
 
+import java.awt.Graphics2D;
+import java.io.InputStream;
+import java.awt.image.BufferedImage;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.scene.Parent;
+import javax.swing.ImageIcon;
 
 @SuppressWarnings({"unused", "FieldCanBeLocal"})
 public class ChatbotUI extends Application {
@@ -63,10 +74,13 @@ public class ChatbotUI extends Application {
     private StackPane rootPane; // overlay parent to host floating collapse handle when sidebar is collapsed
     private Button sideBarHandle;
     private ListView<ChatSession> sideSessionList;
+    private TextField historySearchField;
     // history toggle button (clock) shown in top-right next to MenuBar
     private Button historyToggleBtn;
     // history sidebar footer (clear button container)
     private HBox sideBarFooter;
+    private final AtomicLong historyRefreshVersion = new AtomicLong();
+    private final AtomicLong historySearchVersion = new AtomicLong();
 
     // 右侧联系人 pane
     private VBox contactsPane;
@@ -183,9 +197,54 @@ public class ChatbotUI extends Application {
         Dialog<ButtonType> dialog = new Dialog<>();
         dialog.setTitle("API 设置");
 
-        // API 密钥字段（移除语言播放开关）
-        Label deepseekLabel = new Label("Deepseek API Key:");
-        TextField deepseekField = new TextField(cfg.getApiKey());
+        AiProviderPreset initialPreset = cfg.getAiProviderPreset();
+
+        ComboBox<AiProviderPreset> providerBox = new ComboBox<>();
+        providerBox.getItems().setAll(AiProviderPreset.values());
+        providerBox.getSelectionModel().select(initialPreset);
+        providerBox.setMaxWidth(Double.MAX_VALUE);
+
+        Label protocolValue = new Label();
+        protocolValue.setTextFill(Color.GRAY);
+
+        PasswordField apiKeyField = new PasswordField();
+        apiKeyField.setText(cfg.getAiApiKey());
+
+        TextField baseUrlField = new TextField(cfg.getAiBaseUrl());
+        TextField modelField = new TextField(cfg.getAiModel());
+
+        Label presetHintLabel = new Label();
+        presetHintLabel.setWrapText(true);
+        presetHintLabel.setTextFill(Color.GRAY);
+
+        Runnable syncPreset = () -> {
+            AiProviderPreset selectedPreset = providerBox.getValue();
+            if (selectedPreset == null) {
+                return;
+            }
+            protocolValue.setText(selectedPreset.getProtocol().getDisplayName());
+            presetHintLabel.setText(selectedPreset.getDescription());
+        };
+        syncPreset.run();
+        providerBox.valueProperty().addListener((obs, oldValue, newValue) -> {
+            if (newValue == null) {
+                return;
+            }
+            protocolValue.setText(newValue.getProtocol().getDisplayName());
+            presetHintLabel.setText(newValue.getDescription());
+            if (oldValue != null) {
+                if (baseUrlField.getText() == null
+                        || baseUrlField.getText().isBlank()
+                        || baseUrlField.getText().trim().equals(oldValue.getDefaultBaseUrl())) {
+                    baseUrlField.setText(newValue.getDefaultBaseUrl());
+                }
+                if (modelField.getText() == null
+                        || modelField.getText().isBlank()
+                        || modelField.getText().trim().equals(oldValue.getDefaultModel())) {
+                    modelField.setText(newValue.getDefaultModel());
+                }
+            }
+        });
 
         Label baiduAppIdLabel = new Label("Baidu App ID:");
         TextField baiduAppIdField = new TextField(cfg.getBaiduAppId());
@@ -197,24 +256,63 @@ public class ChatbotUI extends Application {
         GridPane grid = new GridPane();
         grid.setHgap(10);
         grid.setVgap(10);
-        grid.add(deepseekLabel, 0, 0);
-        grid.add(deepseekField, 1, 0);
-        grid.add(baiduAppIdLabel, 0, 1);
-        grid.add(baiduAppIdField, 1, 1);
-        grid.add(baiduApiKeyLabel, 0, 2);
-        grid.add(baiduApiKeyField, 1, 2);
-        grid.add(baiduSecretLabel, 0, 3);
-        grid.add(baiduSecretField, 1, 3);
 
-        dialog.getDialogPane().setContent(grid);
+        int row = 0;
+        grid.add(new Label("AI Provider:"), 0, row);
+        grid.add(providerBox, 1, row++);
+        grid.add(new Label("Protocol:"), 0, row);
+        grid.add(protocolValue, 1, row++);
+        grid.add(new Label("API Key:"), 0, row);
+        grid.add(apiKeyField, 1, row++);
+        grid.add(new Label("Base URL:"), 0, row);
+        grid.add(baseUrlField, 1, row++);
+        grid.add(new Label("Model:"), 0, row);
+        grid.add(modelField, 1, row++);
+        grid.add(new Label("Provider Note:"), 0, row);
+        grid.add(presetHintLabel, 1, row++);
+
+        Separator separator = new Separator();
+        grid.add(separator, 0, row++, 2, 1);
+
+        grid.add(baiduAppIdLabel, 0, row);
+        grid.add(baiduAppIdField, 1, row++);
+        grid.add(baiduApiKeyLabel, 0, row);
+        grid.add(baiduApiKeyField, 1, row++);
+        grid.add(baiduSecretLabel, 0, row);
+        grid.add(baiduSecretField, 1, row);
+
+        GridPane.setHgrow(providerBox, Priority.ALWAYS);
+        GridPane.setHgrow(apiKeyField, Priority.ALWAYS);
+        GridPane.setHgrow(baseUrlField, Priority.ALWAYS);
+        GridPane.setHgrow(modelField, Priority.ALWAYS);
+        GridPane.setHgrow(presetHintLabel, Priority.ALWAYS);
+        GridPane.setHgrow(baiduAppIdField, Priority.ALWAYS);
+        GridPane.setHgrow(baiduApiKeyField, Priority.ALWAYS);
+        GridPane.setHgrow(baiduSecretField, Priority.ALWAYS);
+
+        VBox root = new VBox(12, grid);
+        root.setPadding(new Insets(12));
+        dialog.getDialogPane().setContent(root);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
 
         Optional<ButtonType> opt = dialog.showAndWait();
         if (opt.isPresent() && opt.get() == ButtonType.OK) {
-            cfg.setDeepseekApiKey(deepseekField.getText().trim());
+            AiProviderPreset selectedPreset = providerBox.getValue() == null ? AiProviderPreset.DEEPSEEK : providerBox.getValue();
+            cfg.setAiSettings(
+                    selectedPreset,
+                    selectedPreset.getProtocol(),
+                    apiKeyField.getText().trim(),
+                    baseUrlField.getText().trim(),
+                    modelField.getText().trim(),
+                    cfg.getTemperature(),
+                    cfg.getMaxTokens(),
+                    cfg.getConnectTimeout(),
+                    cfg.getReadTimeout(),
+                    cfg.getWriteTimeout()
+            );
             cfg.setBaiduCredentials(baiduAppIdField.getText().trim(), baiduApiKeyField.getText().trim(), baiduSecretField.getText().trim());
-            showAlert("设置已保存", "API 密钥已保存到配置文件");
-            // 重新初始化 Baidu service
+            showAlert("设置已保存", "AI 与百度语音配置已保存到配置文件");
+
             try {
                 baiduService = new BaiduSpeechService();
             } catch (Throwable ex) {
@@ -480,12 +578,10 @@ public class ChatbotUI extends Application {
     // 设置窗口/任务栏图标
             try {
                 primaryStage.getIcons().clear();
-                Image appIcon = new Image(
-                        Objects.requireNonNull(
-                                getClass().getResourceAsStream("/images/app_icon.png")
-                        )
-                );
-                primaryStage.getIcons().add(appIcon);
+                Image appIcon = loadWindowIcon();
+                if (appIcon != null) {
+                    primaryStage.getIcons().add(appIcon);
+                }
             } catch (Exception ex) {
                 LOGGER.log(Level.WARNING, "加载应用图标失败", ex);
             }
@@ -510,6 +606,7 @@ public class ChatbotUI extends Application {
                     sideBar.setBackground(collapsedBg);
                     sideBar.setPrefWidth(SIDE_BAR_COLLAPSED_WIDTH);
                     sideBar.setMinWidth(SIDE_BAR_COLLAPSED_WIDTH);
+                    if (historySearchField != null) { historySearchField.setVisible(false); historySearchField.setManaged(false); }
                     if (sideSessionList != null) { sideSessionList.setVisible(false); sideSessionList.setManaged(false); }
                     if (sideBarFooter != null) { sideBarFooter.setVisible(false); sideBarFooter.setManaged(false); }
                     // ensure a handle exists so the user can expand from the collapsed state
@@ -546,6 +643,10 @@ public class ChatbotUI extends Application {
                 sideBar.setBackground(expandedBg);
                 sideBar.setPrefWidth(SIDE_BAR_EXPANDED_WIDTH);
                 sideBar.setMinWidth(SIDE_BAR_EXPANDED_WIDTH);
+                if (historySearchField != null) {
+                    historySearchField.setVisible(true);
+                    historySearchField.setManaged(true);
+                }
                 if (sideSessionList != null) {
                     sideSessionList.setVisible(true);
                     sideSessionList.setManaged(true);
@@ -1033,6 +1134,13 @@ public class ChatbotUI extends Application {
             btnBox.setUserData("collapseHandleBox");
         }
 
+        historySearchField = new TextField();
+        historySearchField.setPromptText("搜索历史消息...");
+        historySearchField.setPrefHeight(34);
+        historySearchField.setStyle("-fx-background-color: white; -fx-border-color: #e4e7ec; -fx-border-radius: 8; -fx-background-radius: 8;");
+        historySearchField.textProperty().addListener((obs, oldValue, newValue) -> triggerHistorySearch());
+        VBox.setMargin(historySearchField, new Insets(10, 10, 8, 10));
+
         sideSessionList = new ListView<>();
         sideSessionList.setMaxHeight(Double.MAX_VALUE);
         VBox.setVgrow(sideSessionList, Priority.ALWAYS);
@@ -1130,6 +1238,8 @@ public class ChatbotUI extends Application {
 
         // 初始化折叠状态
         if (sideBarCollapsed) {
+            historySearchField.setVisible(false);
+            historySearchField.setManaged(false);
             sideSessionList.setVisible(false);
             sideSessionList.setManaged(false);
             sideBarFooter.setVisible(false);
@@ -1141,6 +1251,7 @@ public class ChatbotUI extends Application {
         }
 
         if (btnBox != null) vb.getChildren().add(btnBox);
+        vb.getChildren().add(historySearchField);
         vb.getChildren().add(sideSessionList);
         vb.getChildren().add(sideBarFooter);
         return vb;
@@ -1394,17 +1505,63 @@ public class ChatbotUI extends Application {
     }
 
     // 刷新左侧侧边栏显示的历史会话
+    private void applySideBarSessions(List<ChatSession> sessions) {
+        if (sideSessionList == null) {
+            return;
+        }
+        sideSessionList.getItems().setAll(sessions == null ? List.of() : sessions);
+    }
+
+    private void startBackgroundTask(Task<?> task, String threadName) {
+        Thread thread = new Thread(task, threadName);
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private void triggerHistorySearch() {
+        Platform.runLater(() -> {
+            if (sideSessionList == null || chatService == null) {
+                return;
+            }
+
+            String keyword = historySearchField == null ? "" : historySearchField.getText();
+            long version = historySearchVersion.incrementAndGet();
+            Task<List<ChatSession>> searchTask = chatService.createSearchSessionsTask(keyword);
+            searchTask.setOnSucceeded(event -> {
+                if (version != historySearchVersion.get()) {
+                    return;
+                }
+                applySideBarSessions(searchTask.getValue());
+            });
+            searchTask.setOnFailed(event ->
+                    LOGGER.log(Level.WARNING, "Failed to search history messages", searchTask.getException()));
+            startBackgroundTask(searchTask, "history-search-" + version);
+        });
+    }
+
     public void refreshSideBarSessions() {
         Platform.runLater(() -> {
-            if (sideSessionList == null || chatService == null) return;
-            try {
-                List<ChatSession> sessions = chatService.getAllSessions();
-                sideSessionList.getItems().setAll(sessions);
-                // 历史变化后，同时根据最新聊天时间重排联系人
-                sortAndApplyContacts();
-            } catch (Exception e) {
-                LOGGER.log(Level.WARNING, "刷新侧边栏历史失败", e);
+            if (sideSessionList == null || chatService == null) {
+                return;
             }
+
+            long version = historyRefreshVersion.incrementAndGet();
+            Task<List<ChatSession>> refreshTask = chatService.createRefreshSessionsTask();
+            refreshTask.setOnSucceeded(event -> {
+                if (version != historyRefreshVersion.get()) {
+                    return;
+                }
+                sortAndApplyContacts();
+                String keyword = historySearchField == null ? "" : historySearchField.getText();
+                if (keyword == null || keyword.isBlank()) {
+                    applySideBarSessions(refreshTask.getValue());
+                } else {
+                    triggerHistorySearch();
+                }
+            });
+            refreshTask.setOnFailed(event ->
+                    LOGGER.log(Level.WARNING, "Failed to refresh history sidebar", refreshTask.getException()));
+            startBackgroundTask(refreshTask, "history-index-build-" + version);
         });
     }
 
@@ -1984,5 +2141,105 @@ public class ChatbotUI extends Application {
             if (scrollPane != null) scrollPane.setVvalue(1.0);
         });
     }
-}
 
+    private Image loadWindowIcon() {
+        URL icoResource = getClass().getResource("/images/EchoSoul.ico");
+        Image icoImage = loadIcoWindowIcon(icoResource);
+        if (icoImage != null) {
+            return icoImage;
+        }
+
+        Path externalIco = Path.of(System.getProperty("user.dir"), "resources", "images", "EchoSoul.ico");
+        if (Files.exists(externalIco)) {
+            try {
+                Image externalImage = loadIcoWindowIcon(externalIco.toUri().toURL());
+                if (externalImage != null) {
+                    return externalImage;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
+        // PNG fallback when ICO is unavailable on current runtime/platform
+        String[] primaryPngCandidates = {
+                "/images/EchoSoul.png"
+        };
+        for (String candidate : primaryPngCandidates) {
+            try (InputStream in = getClass().getResourceAsStream(candidate)) {
+                if (in == null) {
+                    continue;
+                }
+                Image image = new Image(in);
+                if (!image.isError() && image.getWidth() > 0) {
+                    return image;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
+        Path externalPng = Path.of(System.getProperty("user.dir"), "resources", "images", "EchoSoul.png");
+        if (Files.exists(externalPng)) {
+            try (InputStream in = Files.newInputStream(externalPng)) {
+                Image image = new Image(in);
+                if (!image.isError() && image.getWidth() > 0) {
+                    return image;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
+        String[] candidates = {
+                "/images/app_icon.png",
+                "/images/ai_avatar.png",
+                "/images/user_avatar.png"
+        };
+        for (String candidate : candidates) {
+            try (InputStream in = getClass().getResourceAsStream(candidate)) {
+                if (in == null) {
+                    continue;
+                }
+                Image image = new Image(in);
+                if (!image.isError() && image.getWidth() > 0) {
+                    return image;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return null;
+    }
+
+
+    private Image loadIcoWindowIcon(URL url) {
+        if (url == null) {
+            return null;
+        }
+
+        try {
+            Image directImage = new Image(url.toExternalForm());
+            if (!directImage.isError() && directImage.getWidth() > 0) {
+                return directImage;
+            }
+        } catch (Exception ignored) {
+        }
+
+        try {
+            ImageIcon icon = new ImageIcon(url);
+            int width = icon.getIconWidth();
+            int height = icon.getIconHeight();
+            if (width <= 0 || height <= 0) {
+                return null;
+            }
+
+            BufferedImage buffered = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D graphics = buffered.createGraphics();
+            try {
+                icon.paintIcon(null, graphics, 0, 0);
+            } finally {
+                graphics.dispose();
+            }
+            return SwingFXUtils.toFXImage(buffered, null);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+}

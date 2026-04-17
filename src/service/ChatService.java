@@ -3,6 +3,7 @@ package service;
 import app.ChatbotUI;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import javafx.concurrent.Task;
 import local.ChatBot;
 import model.ChatSession;
 import model.Message;
@@ -20,7 +21,10 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
@@ -42,14 +46,17 @@ public class ChatService {
     private final ConfigManager configManager;
     private final ExecutorService executorService;
     private final HistoryManager historyManager;
+    private final ChatSearchEngine historySearchEngine;
 
-    private String currentPersonaName = "\u6d41\u8424";
+    private String currentPersonaName = "流萤";
     private String currentPersonaId = "liuying";
     private String currentSystemPrompt;
     private String currentGreeting;
     private String currentSessionFilename;
 
     private ChatBot localBot;
+    private volatile List<ChatSession> cachedSessions = List.of();
+    private volatile Map<String, String> messageIdToSessionFilename = Map.of();
 
     public ChatService(ChatbotUI chatUI) {
         this.chatUI = chatUI;
@@ -57,6 +64,7 @@ public class ChatService {
         this.configManager = CONFIG_MANAGER;
         this.executorService = Executors.newFixedThreadPool(2);
         this.historyManager = HistoryManager.getInstance();
+        this.historySearchEngine = new ChatSearchEngine();
 
         try {
             localBot = new ChatBot();
@@ -142,9 +150,9 @@ public class ChatService {
 
         if (session != null) {
             chatHistory.addAll(session.getMessages());
-            boolean hasSystem = !chatHistory.isEmpty() && chatHistory.get(0).getRole() == Message.Role.SYSTEM;
+            boolean hasSystem = !chatHistory.isEmpty() && chatHistory.getFirst().getRole() == Message.Role.SYSTEM;
             if (!hasSystem && currentSystemPrompt != null && !currentSystemPrompt.isBlank()) {
-                chatHistory.add(0, new Message(Message.Role.SYSTEM, currentSystemPrompt));
+                chatHistory.addFirst(new Message(Message.Role.SYSTEM, currentSystemPrompt));
             }
         } else {
             newChatInternal(currentSystemPrompt);
@@ -195,7 +203,7 @@ public class ChatService {
             if (localBot != null) {
                 handleLocalOnlyMessage(userMsg);
             } else {
-                chatUI.showAlert("AI \u914d\u7f6e\u9519\u8bef", validationError);
+                chatUI.showAlert("AI 配置错误", validationError);
             }
             return;
         }
@@ -211,7 +219,7 @@ public class ChatService {
 
     private void handleLocalOnlyMessage(String userMsg) {
         if (localBot == null) {
-            chatUI.showAlert("\u79bb\u7ebf\u8bcd\u5e93\u4e0d\u53ef\u7528", "\u672a\u80fd\u521d\u59cb\u5316\u672c\u5730\u8bcd\u5e93\uff0c\u8bf7\u68c0\u67e5\u8d44\u6e90\u6587\u4ef6\u3002");
+            chatUI.showAlert("离线词库不可用", "未能初始化本地词库，请检查资源文件。");
             return;
         }
 
@@ -297,7 +305,7 @@ public class ChatService {
     private void trimHistory() {
         while (chatHistory.size() > configManager.getHistoryLimit()) {
             int removeIndex = 0;
-            if (!chatHistory.isEmpty() && chatHistory.get(0).getRole() == Message.Role.SYSTEM) {
+            if (!chatHistory.isEmpty() && chatHistory.getFirst().getRole() == Message.Role.SYSTEM) {
                 removeIndex = 1;
             }
             if (chatHistory.size() > removeIndex) {
@@ -312,7 +320,7 @@ public class ChatService {
         try {
             return localBot == null ? "" : localBot.getSmartResponse(userMsg);
         } catch (Throwable ex) {
-            return "\u6211\u5148\u8bb0\u4e0b\u6765\u4e86\uff0c\u521a\u624d\u51fa\u4e86\u4e00\u70b9\u5c0f\u72b6\u51b5\uff0c\u7a0d\u540e\u518d\u597d\u597d\u56de\u590d\u4f60\u3002";
+            return "我先记下来了，刚才出了一点小状况，稍后再好好回复你。";
         }
     }
 
@@ -367,16 +375,16 @@ public class ChatService {
 
     private String validateAiConfig(AiChatConfig config) {
         if (config == null) {
-            return "\u672a\u627e\u5230 AI \u914d\u7f6e\u3002";
+            return "未找到 AI 配置。";
         }
         if (config.normalizedBaseUrl().isBlank()) {
-            return "\u8bf7\u5148\u914d\u7f6e API Base URL \u6216 Endpoint\u3002";
+            return "请先配置 API Base URL 或 Endpoint。";
         }
         if (config.normalizedModel().isBlank()) {
-            return "\u8bf7\u5148\u914d\u7f6e\u6a21\u578b\u540d\u79f0\u3002";
+            return "请先配置模型名称。";
         }
         if (config.isApiKeyMissing()) {
-            return "\u5f53\u524d\u4f9b\u5e94\u5546\u9700\u8981 API Key\uff0c\u8bf7\u5148\u586b\u5199\u6709\u6548\u7684 API Key\u3002";
+            return "当前供应商需要 API Key，请先填写有效的 API Key。";
         }
         return null;
     }
@@ -404,18 +412,18 @@ public class ChatService {
     private String handleApiError(Throwable error) {
         Throwable cause = unwrapCause(error);
         if (cause instanceof TimeoutException) {
-            return "\u8bf7\u6c42\u8d85\u65f6\u4e86\uff0c\u53ef\u4ee5\u7a0d\u540e\u518d\u8bd5\u8bd5\u3002";
+            return "请求超时了，可以稍后再试试。";
         }
         if (cause instanceof SecurityException && cause.getMessage() != null && !cause.getMessage().isBlank()) {
             return cause.getMessage();
         }
         if (cause instanceof IOException) {
-            return "\u7f51\u7edc\u4f3c\u4e4e\u4e0d\u592a\u7a33\u5b9a\uff0c\u53ef\u4ee5\u5148\u68c0\u67e5\u7f51\u7edc\u6216 API \u670d\u52a1\u72b6\u6001\u3002";
+            return "网络似乎不太稳定，可以先检查网络或 API 服务状态。";
         }
         if (cause != null && cause.getMessage() != null && !cause.getMessage().isBlank()) {
             return cause.getMessage();
         }
-        return "\u62b1\u6b49\uff0c\u521a\u624d\u8c03\u7528 AI \u65f6\u51fa\u4e86\u70b9\u5c0f\u95ee\u9898\u3002";
+        return "抱歉，刚才调用 AI 时出了点小问题。";
     }
 
     private Throwable unwrapCause(Throwable error) {
@@ -436,8 +444,8 @@ public class ChatService {
 
     public void clearChatHistory() {
         Message systemMsg = null;
-        if (!chatHistory.isEmpty() && chatHistory.get(0).getRole() == Message.Role.SYSTEM) {
-            systemMsg = chatHistory.get(0);
+        if (!chatHistory.isEmpty() && chatHistory.getFirst().getRole() == Message.Role.SYSTEM) {
+            systemMsg = chatHistory.getFirst();
         }
         chatHistory.clear();
         if (systemMsg != null) {
@@ -469,6 +477,77 @@ public class ChatService {
             return;
         }
         loadExistingSessionInternal(session.getFilename());
+    }
+
+    public Task<List<ChatSession>> createRefreshSessionsTask() {
+        String prefix = personaPrefix();
+        return new Task<>() {
+            @Override
+            protected List<ChatSession> call() {
+                List<ChatSession> filteredSessions = new ArrayList<>();
+                List<Message> allMessages = new ArrayList<>();
+                Map<String, String> nextMessageMap = new HashMap<>();
+
+                for (ChatSession session : historyManager.loadAllSessions()) {
+                    if (session.getFilename() == null || !session.getFilename().startsWith(prefix)) {
+                        continue;
+                    }
+                    filteredSessions.add(session);
+                    for (Message message : session.getMessages()) {
+                        if (message == null || message.getId() == null || message.getId().isBlank()) {
+                            continue;
+                        }
+                        allMessages.add(message);
+                        nextMessageMap.put(message.getId(), session.getFilename());
+                    }
+                }
+
+                historySearchEngine.buildIndex(allMessages);
+                cachedSessions = List.copyOf(filteredSessions);
+                messageIdToSessionFilename = Map.copyOf(nextMessageMap);
+                return filteredSessions;
+            }
+        };
+    }
+
+    public Task<List<ChatSession>> createSearchSessionsTask(String keyword) {
+        String normalizedKeyword = keyword == null ? "" : keyword.trim();
+        List<ChatSession> sessionsSnapshot = cachedSessions;
+        Map<String, String> messageMapSnapshot = messageIdToSessionFilename;
+
+        return new Task<>() {
+            @Override
+            protected List<ChatSession> call() {
+                if (normalizedKeyword.isBlank()) {
+                    return sessionsSnapshot;
+                }
+
+                List<String> matchedMessageIds = historySearchEngine.search(normalizedKeyword);
+                if (matchedMessageIds.isEmpty()) {
+                    return List.of();
+                }
+
+                LinkedHashSet<String> matchedSessionFilenames = new LinkedHashSet<>();
+                for (String messageId : matchedMessageIds) {
+                    String filename = messageMapSnapshot.get(messageId);
+                    if (filename != null && !filename.isBlank()) {
+                        matchedSessionFilenames.add(filename);
+                    }
+                }
+
+                if (matchedSessionFilenames.isEmpty()) {
+                    return List.of();
+                }
+
+                List<ChatSession> matchedSessions = new ArrayList<>();
+                for (ChatSession session : sessionsSnapshot) {
+                    if (session.getFilename() != null && matchedSessionFilenames.contains(session.getFilename())) {
+                        matchedSessions.add(session);
+                    }
+                }
+                return matchedSessions;
+            }
+        };
     }
 
     public List<ChatSession> getAllSessions() {

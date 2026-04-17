@@ -4,7 +4,7 @@
 ![JavaFX](https://img.shields.io/badge/JavaFX-Desktop-orange.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
-![EchoSoul Demo](resources/images/app_icon.png)
+![EchoSoul Demo](resources/images/EchoSoul.ico)
 
 EchoSoul is a JavaFX desktop chat application featuring persona-based conversations, local history management, pluggable AI provider access, and optional speech capabilities.
 
@@ -126,14 +126,20 @@ Package the project into a Fat JAR with dependencies:
 mvn -B -DskipTests clean package
 ```
 
-This produces `target/jpackage-input/echosoul-0.1.1.jar` and `target/jpackage-input/libs/`.
+This produces:
+
+- `target/jpackage-input/echosoul-0.1.1.jar`
+- `target/jpackage-input/libs/`
+- `target/runtime/echosoul-jre/` via `jlink`
 
 **Native Windows App Image:**
 After packaging, you can build a standalone Windows app image or installer using `jpackage`:
 
 ```powershell
-jpackage --type app-image --dest target/installer --input target/jpackage-input --name EchoSoul --main-class app.Main --main-jar echosoul-0.1.1.jar
+./scripts/package.ps1 -Type app-image
 ```
+
+The script uses `resources/images/EchoSoul.ico` when present and packages with `--runtime-image target/runtime/echosoul-jre` so the installer no longer bundles the full default JRE.
 
 ## 📝 Open-Source Notes
 
