@@ -218,6 +218,15 @@ d-----         2026/4/16     19:03                maven-status
 
 PS D:\06_Projects\EchoSoul>
 
+## 2026-04-18 AI Provider Refactor Progress
+* Added `src/service/ai/AiChatProvider.java` as the provider-facing contract and introduced `src/service/ai/AbstractAiChatProvider.java` to centralize shared OkHttp request construction, shared header helpers, provider-specific URL resolution hooks, and common message-body assembly helpers.
+* Refactored `OpenAiCompatibleAdapter`, `AnthropicAdapter`, and `GeminiAdapter` onto the new abstract base so the repeated JSON request scaffolding and response-text extraction logic no longer lives in three separate implementations.
+* Added `src/service/ai/AiJsonSupport.java` to consolidate generic JSON parsing and text/error extraction. `ChatService` and all provider adapters now reuse the same extraction path instead of keeping separate ad-hoc `JsonParser` branches.
+* Simplified `src/service/ChatService.java` so AI requests now run through one async pipeline: snapshot current history, resolve the provider once, execute the HTTP request, normalize HTTP/status-code failures through `buildHttpException(...)`, and fan into one success handler plus one failure handler.
+* Consolidated repeated message/UI update code in `ChatService` with `appendUserMessage(...)`, `appendAssistantMessage(...)`, `showUserMessage(...)`, `showAssistantMessage(...)`, and `refreshSideBarQuietly(...)`, which reduces duplicated JavaFX/UI update branches for local replies, remote replies, greetings, and sidebar refreshes.
+* DTO cleanup opportunity was limited because `src/model` currently only contains `Message` and `ChatSession`; there was not a large family of parallel request/response POJOs to merge. This refactor therefore focused on removing duplicated ad-hoc JSON handling rather than forcing new DTO layers.
+* Verified on 2026-04-18 with `mvn -B -DskipTests compile`: the project compiles successfully after the provider-interface and `ChatService` cleanup.
+
 ---
 
 **[END OF CONTEXT]**

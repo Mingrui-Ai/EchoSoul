@@ -12,7 +12,8 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 import service.ai.AiChatConfig;
-import service.ai.AiProviderAdapter;
+import service.ai.AiChatProvider;
+import service.ai.AiJsonSupport;
 import service.ai.AiProviderAdapterFactory;
 
 import java.io.IOException;
@@ -241,9 +242,9 @@ public class ChatService {
         }
     }
 
-    public CompletableFuture<Void> callAiApiAsync() {
+    public void callAiApiAsync() {
         chatUI.setSendingStatus(true);
-        return CompletableFuture.supplyAsync(() -> {
+        CompletableFuture.supplyAsync(() -> {
             try {
                 return makeApiRequest();
             } catch (IOException ex) {
@@ -286,10 +287,6 @@ public class ChatService {
             }
             return null;
         });
-    }
-
-    public CompletableFuture<Void> callDeepSeekApiAsync() {
-        return callAiApiAsync();
     }
 
     private String findLatestUserMessage() {
@@ -337,7 +334,7 @@ public class ChatService {
 
     private String makeApiRequest() throws IOException {
         AiChatConfig aiConfig = configManager.getAiChatConfig();
-        AiProviderAdapter adapter = AiProviderAdapterFactory.forProtocol(aiConfig.protocol());
+        AiChatProvider adapter = AiProviderAdapterFactory.forProtocol(aiConfig.protocol());
         Request request = adapter.buildRequest(chatHistory, aiConfig);
 
         try (Response response = HTTP_CLIENT.newCall(request).execute()) {
@@ -350,7 +347,7 @@ public class ChatService {
                 throw new RuntimeException("AI returned an empty response.");
             }
 
-            String errorMessage = extractApiErrorMessage(responseBody);
+            String errorMessage = AiJsonSupport.extractErrorText(responseBody);
             if (response.code() == 401 || response.code() == 403) {
                 if (errorMessage.isBlank()) {
                     errorMessage = "API key is invalid or has expired.";
@@ -387,26 +384,6 @@ public class ChatService {
             return "当前供应商需要 API Key，请先填写有效的 API Key。";
         }
         return null;
-    }
-
-    private String extractApiErrorMessage(String responseBody) {
-        if (responseBody == null || responseBody.isBlank()) {
-            return "";
-        }
-        try {
-            JsonObject json = JsonParser.parseString(responseBody).getAsJsonObject();
-            if (json.has("error")) {
-                return AiProviderAdapter.extractText(json.get("error")).trim();
-            }
-            if (json.has("message")) {
-                return AiProviderAdapter.extractText(json.get("message")).trim();
-            }
-            if (json.has("promptFeedback")) {
-                return AiProviderAdapter.extractText(json.get("promptFeedback")).trim();
-            }
-        } catch (Exception ignored) {
-        }
-        return responseBody.trim();
     }
 
     private String handleApiError(Throwable error) {
@@ -550,16 +527,6 @@ public class ChatService {
         };
     }
 
-    public List<ChatSession> getAllSessions() {
-        String prefix = personaPrefix();
-        List<ChatSession> filtered = new ArrayList<>();
-        for (ChatSession session : historyManager.loadAllSessions()) {
-            if (session.getFilename() != null && session.getFilename().startsWith(prefix)) {
-                filtered.add(session);
-            }
-        }
-        return filtered;
-    }
 
     public boolean deleteSession(String filename) {
         if (filename == null || filename.isBlank()) {
